@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
+# We use a wildcard to be safe, but requirements.txt is the standard
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
