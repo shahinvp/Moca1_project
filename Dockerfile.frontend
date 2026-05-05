@@ -16,6 +16,9 @@ COPY front-end/my-react-app/ ./
 ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
 
+# Create .env file for Vite to pick up
+RUN echo "VITE_API_URL=$VITE_API_URL" > .env
+
 RUN npm run build
 
 # Step 2: Serve the application using Nginx
