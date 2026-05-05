@@ -16,7 +16,7 @@ const Register = () => {
   const onSubmit = async (data) => {
     try {
       const response = await axios.post(
-        "http://127.0.0.1:8000/register/",
+        import.meta.env.VITE_API_URL + "/register/",
         data
       );
 

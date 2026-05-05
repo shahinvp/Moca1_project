@@ -160,7 +160,7 @@ const ManagerDashboard = () => {
 
   const verifySession = async () => {
     try {
-      const res = await apiFetch("http://127.0.0.1:8000/me/");
+      const res = await apiFetch(import.meta.env.VITE_API_URL + "/me/");
       if (!res.ok) throw new Error("Session expired");
       const user = await res.json();
 
@@ -186,7 +186,7 @@ const ManagerDashboard = () => {
   /* API: Employees */
   const fetchEmployees = async () => {
     try {
-      const res = await apiFetch("http://127.0.0.1:8000/employees/");
+      const res = await apiFetch(import.meta.env.VITE_API_URL + "/employees/");
       const data = await res.json();
       setEmployees(data);
     } catch (e) { console.error(e); }
@@ -196,7 +196,7 @@ const ManagerDashboard = () => {
     try {
       const currentManagerId = verifiedManager?.id || managerId;
       const currentUsername = verifiedManager?.username || localStorage.getItem("username");
-      const res = await apiFetch(`http://127.0.0.1:8000/users/?exclude_id=${currentManagerId}`);
+      const res = await apiFetch(`${import.meta.env.VITE_API_URL}/users/?exclude_id=${currentManagerId}`);
       const data = await res.json();
       const availableContacts = data.filter(
         (user) =>
@@ -211,14 +211,14 @@ const ManagerDashboard = () => {
   };
 
   const approveEmployee = async (id) => {
-    await apiFetch(`http://127.0.0.1:8000/approve/${id}/`, { method: "PUT" });
+    await apiFetch(`${import.meta.env.VITE_API_URL}/approve/${id}/`, { method: "PUT" });
     fetchEmployees();
     notify("Employee approved");
   };
 
   const deleteEmployee = async (id) => {
     if (!window.confirm("Remove this employee?")) return;
-    await apiFetch(`http://127.0.0.1:8000/delete/${id}/`, { method: "DELETE" });
+    await apiFetch(`${import.meta.env.VITE_API_URL}/delete/${id}/`, { method: "DELETE" });
     fetchEmployees();
     notify("Employee removed", "danger");
   };
@@ -226,7 +226,7 @@ const ManagerDashboard = () => {
   /* API: Works */
   const fetchWorks = async () => {
     try {
-      const res = await apiFetch("http://127.0.0.1:8000/all-work/");
+      const res = await apiFetch(import.meta.env.VITE_API_URL + "/all-work/");
       const data = await res.json();
       setWorks(data);
     } catch (e) { console.error(e); }
@@ -238,7 +238,7 @@ const ManagerDashboard = () => {
       return;
     }
     setAssignLoading(true);
-    await apiFetch("http://127.0.0.1:8000/assign-work/", {
+    await apiFetch(import.meta.env.VITE_API_URL + "/assign-work/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -259,7 +259,7 @@ const ManagerDashboard = () => {
 
   const deleteWork = async (id) => {
     if (!window.confirm("Delete this task?")) return;
-    const res = await apiFetch(`http://127.0.0.1:8000/delete-work/${id}/`, { method: "DELETE" });
+    const res = await apiFetch(`${import.meta.env.VITE_API_URL}/delete-work/${id}/`, { method: "DELETE" });
     if (res.ok) {
       setWorks((prev) => prev.filter((w) => w.id !== id));
       notify("Task deleted", "danger");
@@ -275,7 +275,7 @@ const ManagerDashboard = () => {
   };
 
   const updateWork = async () => {
-    const res = await apiFetch(`http://127.0.0.1:8000/update-work/${editingWorkId}/`, {
+    const res = await apiFetch(`${import.meta.env.VITE_API_URL}/update-work/${editingWorkId}/`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: editTitle, description: editDescription }),
@@ -307,11 +307,11 @@ const ManagerDashboard = () => {
 
     if (!options.silent) setMessageLoading(true);
     try {
-      const res = await apiFetch(`http://127.0.0.1:8000/messages/${currentManagerId}/${contactId}/`);
+      const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${currentManagerId}/${contactId}/`);
       if (!res.ok) throw new Error("Failed to load messages");
       const data = await res.json();
       setMessages(data);
-      await apiFetch(`http://127.0.0.1:8000/messages/${currentManagerId}/${contactId}/seen/`, {
+      await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${currentManagerId}/${contactId}/seen/`, {
         method: "POST",
       });
       fetchUnreadCount(currentManagerId);
@@ -328,7 +328,7 @@ const ManagerDashboard = () => {
     if (!userId) return;
 
     try {
-      const res = await apiFetch(`http://127.0.0.1:8000/messages/unread/${userId}/`);
+      const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/unread/${userId}/`);
       if (!res.ok) return;
       const data = await res.json();
       setUnreadCount(data.count || 0);
@@ -341,7 +341,7 @@ const ManagerDashboard = () => {
     if (!userId) return;
 
     try {
-      const res = await apiFetch(`http://127.0.0.1:8000/messages/summaries/${userId}/`);
+      const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/summaries/${userId}/`);
       if (!res.ok) return;
       const data = await res.json();
       setContactSummaries(Object.fromEntries(data.map((item) => [item.contact, item])));
@@ -358,7 +358,7 @@ const ManagerDashboard = () => {
       return;
     }
 
-    const res = await apiFetch("http://127.0.0.1:8000/messages/send/", {
+    const res = await apiFetch(import.meta.env.VITE_API_URL + "/messages/send/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -396,7 +396,7 @@ const ManagerDashboard = () => {
       return;
     }
 
-    const res = await apiFetch(`http://127.0.0.1:8000/messages/${messageId}/edit/`, {
+    const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${messageId}/edit/`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sender: currentManagerId, body: editingMessageBody }),
@@ -418,7 +418,7 @@ const ManagerDashboard = () => {
 
     if (!window.confirm("Delete this message?")) return;
 
-    const res = await apiFetch(`http://127.0.0.1:8000/messages/${messageId}/delete/`, {
+    const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${messageId}/delete/`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sender: currentManagerId }),

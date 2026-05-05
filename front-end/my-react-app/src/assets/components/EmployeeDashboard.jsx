@@ -178,7 +178,7 @@ const EmployeeDashboard = () => {
 
   const verifySession = async () => {
     try {
-      const res = await apiFetch("http://127.0.0.1:8000/me/");
+      const res = await apiFetch(import.meta.env.VITE_API_URL + "/me/");
       if (!res.ok) throw new Error("Session expired");
       const user = await res.json();
 
@@ -201,7 +201,7 @@ const EmployeeDashboard = () => {
     setError(null);
     try {
       const res = await apiFetch(
-        `http://127.0.0.1:8000/employee-work/${employeeId}/`
+        `${import.meta.env.VITE_API_URL}/employee-work/${employeeId}/`
       );
       if (!res.ok) throw new Error("Failed to load tasks");
       const data = await res.json();
@@ -221,7 +221,7 @@ const EmployeeDashboard = () => {
 
     try {
       const res = await apiFetch(
-        `http://127.0.0.1:8000/update-work/${workId}/`,
+        `${import.meta.env.VITE_API_URL}/update-work/${workId}/`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -238,7 +238,7 @@ const EmployeeDashboard = () => {
 
   const fetchContacts = async () => {
     try {
-      const res = await apiFetch(`http://127.0.0.1:8000/users/?exclude_id=${employeeId}`);
+      const res = await apiFetch(`${import.meta.env.VITE_API_URL}/users/?exclude_id=${employeeId}`);
       if (!res.ok) throw new Error("Failed to load people");
       const data = await res.json();
       const availableContacts = data.filter(
@@ -263,7 +263,7 @@ const EmployeeDashboard = () => {
     const requestedManagerId = String(managerId);
     if (!options.silent) setMessageLoading(true);
     try {
-      const res = await apiFetch(`http://127.0.0.1:8000/messages/${employeeId}/${managerId}/`);
+      const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${employeeId}/${managerId}/`);
       if (!res.ok) throw new Error("Failed to load messages");
       const data = await res.json();
 
@@ -277,7 +277,7 @@ const EmployeeDashboard = () => {
       if (!Array.isArray(data)) throw new Error("Invalid messages response");
 
       setMessages(data);
-      await apiFetch(`http://127.0.0.1:8000/messages/${employeeId}/${managerId}/seen/`, {
+      await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${employeeId}/${managerId}/seen/`, {
         method: "POST",
       });
       fetchUnreadCount();
@@ -296,7 +296,7 @@ const EmployeeDashboard = () => {
     if (!employeeId) return;
 
     try {
-      const res = await apiFetch(`http://127.0.0.1:8000/messages/unread/${employeeId}/`);
+      const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/unread/${employeeId}/`);
       if (!res.ok) return;
       const data = await res.json();
       setUnreadCount(data.count || 0);
@@ -309,7 +309,7 @@ const EmployeeDashboard = () => {
     if (!employeeId) return;
 
     try {
-      const res = await apiFetch(`http://127.0.0.1:8000/messages/summaries/${employeeId}/`);
+      const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/summaries/${employeeId}/`);
       if (!res.ok) return;
       const data = await res.json();
       setContactSummaries(Object.fromEntries(data.map((item) => [item.contact, item])));
@@ -338,7 +338,7 @@ const EmployeeDashboard = () => {
     setMessageSending(true);
 
     try {
-      const res = await apiFetch("http://127.0.0.1:8000/messages/send/", {
+      const res = await apiFetch(import.meta.env.VITE_API_URL + "/messages/send/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -381,7 +381,7 @@ const EmployeeDashboard = () => {
       return;
     }
 
-    const res = await apiFetch(`http://127.0.0.1:8000/messages/${messageId}/edit/`, {
+    const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${messageId}/edit/`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sender: employeeId, body: editingMessageBody }),
@@ -401,7 +401,7 @@ const EmployeeDashboard = () => {
   const deleteMessage = async (messageId) => {
     if (!window.confirm("Delete this message?")) return;
 
-    const res = await apiFetch(`http://127.0.0.1:8000/messages/${messageId}/delete/`, {
+    const res = await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${messageId}/delete/`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sender: employeeId }),

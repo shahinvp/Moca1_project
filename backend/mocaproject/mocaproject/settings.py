@@ -25,7 +25,8 @@ SECRET_KEY = 'django-insecure-)g_q!b+apn=vs(dciy1nj69ofn=4(*1)328l!jgixk461_e71g
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+import os
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '127.0.0.1').split(',')
 
 
 # Application definition
@@ -141,7 +142,5 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ],
 }
-
-ALLOWED_HOSTS = ["your-backend.onrender.com"]
 
 
