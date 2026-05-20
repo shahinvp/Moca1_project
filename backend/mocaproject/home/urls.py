@@ -25,4 +25,9 @@ urlpatterns = [
     path("messages/send/", views.send_message),
     path("messages/<int:pk>/edit/", views.edit_message),
     path("messages/<int:pk>/delete/", views.delete_message),
+
+    # Password Reset
+    path("password-reset/request-otp/", user.request_password_reset_otp, name="request_otp"),
+    path("password-reset/verify-otp/", user.verify_password_reset_otp, name="verify_otp"),
+    path("password-reset/reset-password/", user.reset_password, name="reset_password"),
 ]

@@ -1,9 +1,0 @@
-# Root .dockerignore
-backend/myenv/
-front-end/my-react-app/node_modules/
-front-end/my-react-app/dist/
-.git/
-.env
-db.sqlite3
-**/__pycache__/
-*.pyc

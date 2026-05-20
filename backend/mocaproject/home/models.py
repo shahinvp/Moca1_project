@@ -54,6 +54,8 @@ class Work(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+    completion_date = models.DateField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.title
@@ -115,3 +117,19 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.sender_id} -> {self.receiver_id}"
+
+
+class PasswordResetOTP(models.Model):
+    email = models.EmailField()
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_verified = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.email} - {self.otp}"
+
+    def is_expired(self):
+        from django.utils import timezone
+        import datetime
+        # OTP expires in 60 seconds
+        return timezone.now() > self.created_at + datetime.timedelta(seconds=60)

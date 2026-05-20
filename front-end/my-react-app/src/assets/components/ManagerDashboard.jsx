@@ -1,4 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useLayoutEffect } from "react";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+
+
 
 /* Google Fonts */
 const injectFonts = () => {
@@ -13,7 +17,6 @@ const injectFonts = () => {
 
 /* Helpers */
 const initials = (name = "") =>
-  
   name
     .split(" ")
     .map((p) => p[0])
@@ -90,15 +93,21 @@ const ManagerDashboard = () => {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [selectedEmployee, setSelectedEmployee] = useState("");
+  const [completionDate, setCompletionDate] = useState("");
   const [assignLoading, setAssignLoading] = useState(false);
 
   const [editingWorkId, setEditingWorkId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editCompletionDate, setEditCompletionDate] = useState("");
 
   const [activeTab, setActiveTab] = useState("overview");
   const [notification, setNotification] = useState(null);
   const [selectedContact, setSelectedContact] = useState("");
+  const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [taskEmployeeFilter, setTaskEmployeeFilter] = useState("all");
+  const [reportEmployeeFilter, setReportEmployeeFilter] = useState("all");
+
   const [messages, setMessages] = useState([]);
   const [messageBody, setMessageBody] = useState("");
   const [messageLoading, setMessageLoading] = useState(false);
@@ -110,6 +119,11 @@ const ManagerDashboard = () => {
     id: managerId,
     username: localStorage.getItem("username") || "",
   });
+  const messagesEndRef = useRef(null);
+  const lastMsgCountRef = useRef(0);
+  const lastSelectionRef = useRef("");
+  const needsScrollRef = useRef(false);
+  const scrollContainerRef = useRef(null);
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -123,15 +137,18 @@ const ManagerDashboard = () => {
 
     loadDashboard();
 
-    const unreadTimer = setInterval(() => {
+    const dataTimer = setInterval(() => {
       fetchUnreadCount();
       fetchContactSummaries();
-    }, 10000);
-    return () => clearInterval(unreadTimer);
+      fetchWorks({ silent: true });
+      fetchEmployees({ silent: true });
+    }, 5000);
+    return () => clearInterval(dataTimer);
   }, []);
 
   useEffect(() => {
     if (activeTab === "messages" && selectedContact) {
+      needsScrollRef.current = true;
       fetchMessages(selectedContact);
     }
   }, [activeTab, selectedContact]);
@@ -147,6 +164,30 @@ const ManagerDashboard = () => {
   }, [activeTab, selectedContact]);
 
   useEffect(() => {
+    if (!selectedContact || activeTab !== "messages") return;
+
+    const isNewMessage = messages.length > lastMsgCountRef.current;
+
+    if (needsScrollRef.current || isNewMessage) {
+      const doScroll = () => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      };
+
+      doScroll();
+      requestAnimationFrame(doScroll);
+      setTimeout(doScroll, 50);
+      setTimeout(doScroll, 150);
+
+      if (needsScrollRef.current && !messageLoading && messages.length > 0) {
+        needsScrollRef.current = false;
+      }
+      lastMsgCountRef.current = messages.length;
+    }
+  }, [messages, selectedContact, messageLoading, activeTab]);
+
+  useEffect(() => {
     if (selectedContact && String(selectedContact) === String(getCurrentManagerId())) {
       setSelectedContact("");
       setMessages([]);
@@ -158,13 +199,88 @@ const ManagerDashboard = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const downloadCompletedPDF = () => {
+    try {
+      // Use completed_at if available, otherwise fall back to created_at for legacy tasks
+      const filteredWorks = works
+        .filter((w) => {
+          if (w.status !== "completed") return false;
+          if (reportEmployeeFilter !== "all" && String(w.employee) !== String(reportEmployeeFilter)) return false;
+          const dateStr = w.completed_at || w.created_at;
+          return dateStr && dateStr.startsWith(reportMonth);
+        })
+        .sort((a, b) => new Date(b.completed_at || b.created_at) - new Date(a.completed_at || a.created_at));
+
+      if (filteredWorks.length === 0) {
+        notify(`No completed tasks found for ${reportMonth}`, "warning");
+        return;
+      }
+
+      const doc = new jsPDF();
+      const empMap = Object.fromEntries(employees.map((e) => [e.id, e.username]));
+      
+      // Parse month name carefully
+      let monthName = reportMonth;
+      try {
+        monthName = new Date(reportMonth + "-01").toLocaleString("default", { month: "long", year: "numeric" });
+      } catch (e) {
+        console.error("Date parsing error", e);
+      }
+
+      // Title
+      doc.setFontSize(18);
+      doc.text(`Completed Tasks Report - ${monthName}`, 14, 20);
+      
+      // Subtitle
+      doc.setFontSize(11);
+      doc.setTextColor(100);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 28);
+      doc.text(`Employee Filter: ${reportEmployeeFilter === "all" ? "All" : empMap[reportEmployeeFilter]}`, 14, 34);
+
+      const headers = [["Title", "Assigned To", "Start Date", "Due Date", "Completion Date"]];
+      const data = filteredWorks.map((w) => [
+        w.title,
+        empMap[w.employee] || "Unassigned",
+        w.created_at ? new Date(w.created_at).toLocaleDateString() : "",
+        w.completion_date ? new Date(w.completion_date).toLocaleDateString() : "—",
+        w.completed_at ? new Date(w.completed_at).toLocaleDateString() : "—",
+      ]);
+
+      autoTable(doc, {
+        startY: 40,
+        head: headers,
+        body: data,
+        theme: "grid",
+        headStyles: { fillColor: [24, 95, 165], textColor: 255 },
+        styles: { fontSize: 9 },
+        columnStyles: {
+          0: { cellWidth: 50 }, // Title
+        },
+      });
+
+      doc.save(`completed_works_${reportMonth}.pdf`);
+      notify("PDF Report downloaded");
+    } catch (err) {
+      console.error("PDF Generation Error:", err);
+      notify("Failed to generate PDF. Check console for details.", "danger");
+    }
+  };
+
+
+
+
+
   const verifySession = async () => {
     try {
       const res = await apiFetch(import.meta.env.VITE_API_URL + "/me/");
       if (!res.ok) throw new Error("Session expired");
       const user = await res.json();
 
-      if (user.role !== "manager") throw new Error("Invalid role");
+      if (user.role !== "manager") {
+        localStorage.clear();
+        window.location.href = "/login";
+        return null;
+      }
 
       if (user.username !== localStorage.getItem("username")) {
         localStorage.setItem("username", user.username);
@@ -184,7 +300,7 @@ const ManagerDashboard = () => {
   };
 
   /* API: Employees */
-  const fetchEmployees = async () => {
+  const fetchEmployees = async (options = {}) => {
     try {
       const res = await apiFetch(import.meta.env.VITE_API_URL + "/employees/");
       const data = await res.json();
@@ -224,7 +340,7 @@ const ManagerDashboard = () => {
   };
 
   /* API: Works */
-  const fetchWorks = async () => {
+  const fetchWorks = async (options = {}) => {
     try {
       const res = await apiFetch(import.meta.env.VITE_API_URL + "/all-work/");
       const data = await res.json();
@@ -233,28 +349,42 @@ const ManagerDashboard = () => {
   };
 
   const assignWork = async () => {
-    if (!title.trim() || !description.trim() || !selectedEmployee) {
-      notify("Fill in all fields before assigning", "warning");
+    if (!title.trim()) {
+      notify("Please enter a task title", "warning");
+      return;
+    }
+    if (!description.trim()) {
+      notify("Please enter a description", "warning");
+      return;
+    }
+    if (!selectedEmployee) {
+      notify("Please select an employee to assign to", "warning");
       return;
     }
     setAssignLoading(true);
-    await apiFetch(import.meta.env.VITE_API_URL + "/assign-work/", {
+    const res = await apiFetch(import.meta.env.VITE_API_URL + "/assign-work/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title,
         description,
+        completion_date: completionDate || null,
         manager: managerId,
         employee: selectedEmployee,
       }),
     });
-    setTitle("");
-    setDescription("");
-    setSelectedEmployee("");
     setAssignLoading(false);
-    fetchWorks();
-    notify("Task assigned successfully");
-    setActiveTab("tasks");
+    if (res && res.ok) {
+      setTitle("");
+      setDescription("");
+      setCompletionDate("");
+      setSelectedEmployee("");
+      fetchWorks();
+      notify("Task assigned successfully");
+      setActiveTab("tasks");
+    } else {
+      notify("Failed to assign task. Please try again.", "danger");
+    }
   };
 
   const deleteWork = async (id) => {
@@ -272,19 +402,20 @@ const ManagerDashboard = () => {
     setEditingWorkId(work.id);
     setEditTitle(work.title);
     setEditDescription(work.description);
+    setEditCompletionDate(work.completion_date || "");
   };
 
   const updateWork = async () => {
     const res = await apiFetch(`${import.meta.env.VITE_API_URL}/update-work/${editingWorkId}/`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: editTitle, description: editDescription }),
+      body: JSON.stringify({ title: editTitle, description: editDescription, completion_date: editCompletionDate || null }),
     });
     if (res.ok) {
       setWorks((prev) =>
         prev.map((w) =>
           w.id === editingWorkId
-            ? { ...w, title: editTitle, description: editDescription }
+            ? { ...w, title: editTitle, description: editDescription, completion_date: editCompletionDate || null }
             : w
         )
       );
@@ -311,11 +442,13 @@ const ManagerDashboard = () => {
       if (!res.ok) throw new Error("Failed to load messages");
       const data = await res.json();
       setMessages(data);
-      await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${currentManagerId}/${contactId}/seen/`, {
-        method: "POST",
-      });
-      fetchUnreadCount(currentManagerId);
-      fetchContactSummaries(currentManagerId);
+      if (activeTab === "messages") {
+        await apiFetch(`${import.meta.env.VITE_API_URL}/messages/${currentManagerId}/${contactId}/seen/`, {
+          method: "POST",
+        });
+        fetchUnreadCount(currentManagerId);
+        fetchContactSummaries(currentManagerId);
+      }
     } catch (e) {
       console.error(e);
       if (!options.silent) notify("Could not load messages", "danger");
@@ -483,6 +616,7 @@ const ManagerDashboard = () => {
               { id: "employees", label: "Employees", icon: "E", badge: pending || null },
               { id: "tasks", label: "All Tasks", icon: "T" },
               { id: "assign", label: "Assign Task", icon: "+" },
+              { id: "completed", label: "Completed Reports", icon: "C" },
               { id: "messages", label: "Messages", icon: "M", badge: unreadCount || null },
             ].map((tab) => (
               <button
@@ -519,6 +653,7 @@ const ManagerDashboard = () => {
               {activeTab === "employees" && "Team Members"}
               {activeTab === "tasks" && "Task Board"}
               {activeTab === "assign" && "Assign Task"}
+              {activeTab === "completed" && "Completed Reports"}
               {activeTab === "messages" && "Private Messages"}
             </h1>
             <p style={s.pageSubtitle}>
@@ -526,6 +661,7 @@ const ManagerDashboard = () => {
               {activeTab === "employees" && "Manage and approve your team"}
               {activeTab === "tasks" && "Track all assigned work"}
               {activeTab === "assign" && "Create and delegate a new task"}
+              {activeTab === "completed" && "View and download completed task history"}
               {activeTab === "messages" && "Personal encrypted messages with everyone"}
             </p>
           </div>
@@ -552,21 +688,24 @@ const ManagerDashboard = () => {
 
             {/* Recent tasks preview */}
             <SectionCard title="Recent Tasks">
-              {works.slice(0, 4).map((work, i) => (
-                <React.Fragment key={work.id}>
-                  {i > 0 && <Divider />}
-                  <div style={s.overviewRow}>
-                    <div style={{ ...s.statusBar, background: STATUS_META[work.status]?.bar }} />
-                    <div style={s.overviewLeft}>
-                      <span style={s.overviewTitle}>{work.title}</span>
-                      <span style={s.overviewEmployee}>
-                        {employeeMap[work.employee] || "-"}
-                      </span>
+              {[...works]
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                .slice(0, 4)
+                .map((work, i) => (
+                  <React.Fragment key={work.id}>
+                    {i > 0 && <Divider />}
+                    <div style={s.overviewRow}>
+                      <div style={{ ...s.statusBar, background: STATUS_META[work.status]?.bar }} />
+                      <div style={s.overviewLeft}>
+                        <span style={s.overviewTitle}>{work.title}</span>
+                        <span style={s.overviewEmployee}>
+                          {employeeMap[work.employee] || "-"}
+                        </span>
+                      </div>
+                      <Badge status={work.status} />
                     </div>
-                    <Badge status={work.status} />
-                  </div>
-                </React.Fragment>
-              ))}
+                  </React.Fragment>
+                ))}
               {works.length === 0 && <p style={s.emptyText}>No tasks yet</p>}
             </SectionCard>
           </div>
@@ -620,58 +759,98 @@ const ManagerDashboard = () => {
         )}
 
         {/* Tasks tab */}
-        {activeTab === "tasks" && (
-          <SectionCard title={`All Tasks (${works.length})`}>
-            {works.length === 0 && <p style={s.emptyText}>No tasks assigned yet</p>}
-            {works.map((work, i) => (
-              <React.Fragment key={work.id}>
-                {i > 0 && <Divider />}
-                <div style={s.taskRow}>
-                  <div style={{ ...s.statusBar, background: STATUS_META[work.status]?.bar }} />
+        {activeTab === "tasks" && (() => {
+          const filteredTasks = works
+            .filter(w => taskEmployeeFilter === "all" || String(w.employee) === String(taskEmployeeFilter))
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-                  {editingWorkId === work.id ? (
-                    <div style={{ flex: 1, paddingLeft: 12 }}>
-                      <input
-                        style={s.input}
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        placeholder="Task title"
-                      />
-                      <input
-                        style={s.input}
-                        value={editDescription}
-                        onChange={(e) => setEditDescription(e.target.value)}
-                        placeholder="Description"
-                      />
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button style={s.btnSave} onClick={updateWork}>Save</button>
-                        <button style={s.btnCancel} onClick={() => setEditingWorkId(null)}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={s.taskLeft}>
-                      <div style={s.taskTitle}>{work.title}</div>
-                      <div style={s.taskDesc}>{work.description}</div>
-                      <div style={s.taskMeta}>
-                        <span style={s.taskEmployee}>
-                          {employeeMap[work.employee] || "Unassigned"}
-                        </span>
-                        <Badge status={work.status} />
-                      </div>
-                    </div>
-                  )}
-
-                  {editingWorkId !== work.id && (
-                    <div style={s.taskActions}>
-                      <button style={s.btnEdit} onClick={() => startEdit(work)}>Edit</button>
-                      <button style={s.btnDelete} onClick={() => deleteWork(work.id)}>Delete</button>
-                    </div>
-                  )}
+          return (
+            <SectionCard
+              title={`All Tasks (${filteredTasks.length})`}
+              action={
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 13, color: "#555" }}>Employee:</span>
+                  <select
+                    value={taskEmployeeFilter}
+                    onChange={(e) => setTaskEmployeeFilter(e.target.value)}
+                    style={{ ...s.input, width: "auto", padding: "4px 8px" }}
+                  >
+                    <option value="all">All Employees</option>
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.username}</option>
+                    ))}
+                  </select>
                 </div>
-              </React.Fragment>
-            ))}
-          </SectionCard>
-        )}
+              }
+            >
+              {filteredTasks.length === 0 && <p style={s.emptyText}>No tasks found</p>}
+              {filteredTasks.map((work, i) => (
+                <React.Fragment key={work.id}>
+                  {i > 0 && <Divider />}
+                  <div style={s.taskRow}>
+                    <div style={{ ...s.statusBar, background: STATUS_META[work.status]?.bar }} />
+
+                    {editingWorkId === work.id ? (
+                      <div style={{ flex: 1, paddingLeft: 12 }}>
+                        <input
+                          style={s.input}
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          placeholder="Task title"
+                        />
+                        <input
+                          style={s.input}
+                          value={editDescription}
+                          onChange={(e) => setEditDescription(e.target.value)}
+                          placeholder="Description"
+                        />
+                        <input
+                          type="date"
+                          style={s.input}
+                          value={editCompletionDate}
+                          onChange={(e) => setEditCompletionDate(e.target.value)}
+                        />
+                        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                          <button style={s.btnSave} onClick={updateWork}>Save</button>
+                          <button style={s.btnCancel} onClick={() => setEditingWorkId(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={s.taskLeft}>
+                        <div style={s.taskTitle}>{work.title}</div>
+                        <div style={s.taskDesc}>{work.description}</div>
+                        <div style={s.taskMeta}>
+                          <span style={s.taskEmployee}>
+                            To: {employeeMap[work.employee] || "Unassigned"}
+                          </span>
+                          <span style={s.taskEmployee}>
+                            By: {contactMap[work.manager] || managerProfile?.username}
+                          </span>
+                          <span style={s.taskEmployee}>
+                            Assigned: {new Date(work.created_at).toLocaleDateString()}
+                          </span>
+                          {work.completion_date && (
+                            <span style={s.taskEmployee}>
+                              Due: {new Date(work.completion_date).toLocaleDateString()}
+                            </span>
+                          )}
+                          <Badge status={work.status} />
+                        </div>
+                      </div>
+                    )}
+
+                    {editingWorkId !== work.id && work.status !== "completed" && (
+                      <div style={s.taskActions}>
+                        <button style={s.btnEdit} onClick={() => startEdit(work)}>Edit</button>
+                        <button style={s.btnDelete} onClick={() => deleteWork(work.id)}>Delete</button>
+                      </div>
+                    )}
+                  </div>
+                </React.Fragment>
+              ))}
+            </SectionCard>
+          )
+        })()}
 
         {/* Assign tab */}
         {activeTab === "assign" && (
@@ -712,6 +891,15 @@ const ManagerDashboard = () => {
                     ))}
                 </select>
               </div>
+              <div style={s.formGroup}>
+                <label style={s.label}>Completion Date</label>
+                <input
+                  type="date"
+                  style={s.input}
+                  value={completionDate}
+                  onChange={(e) => setCompletionDate(e.target.value)}
+                />
+              </div>
               <button
                 style={{ ...s.btnAssign, opacity: assignLoading ? 0.7 : 1 }}
                 onClick={assignWork}
@@ -722,6 +910,97 @@ const ManagerDashboard = () => {
             </SectionCard>
           </div>
         )}
+
+        {activeTab === "completed" && (() => {
+          // Show ALL completed works sorted newest first — month picker only filters the CSV download
+          const completedWorks = works
+            .filter((w) => {
+              if (w.status !== "completed") return false;
+              if (reportEmployeeFilter !== "all" && String(w.employee) !== String(reportEmployeeFilter)) return false;
+              const dateStr = w.completed_at || w.created_at;
+              return dateStr && dateStr.startsWith(reportMonth);
+            })
+            .sort((a, b) => {
+              const da = new Date(b.completed_at || b.created_at);
+              const db = new Date(a.completed_at || a.created_at);
+              return da - db;
+            });
+
+          return (
+            <SectionCard
+              title={`Completed Reports (${completedWorks.length} total)`}
+              action={
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, color: "#555" }}>Month:</span>
+                  <input
+                    type="month"
+                    value={reportMonth}
+                    onChange={(e) => setReportMonth(e.target.value)}
+                    style={{ ...s.input, margin: 0, padding: "4px 8px", width: "auto" }}
+                  />
+                  <span style={{ fontSize: 13, color: "#555" }}>Employee:</span>
+                  <select
+                    value={reportEmployeeFilter}
+                    onChange={(e) => setReportEmployeeFilter(e.target.value)}
+                    style={{ ...s.input, width: "auto", padding: "4px 8px" }}
+                  >
+                    <option value="all">All Employees</option>
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.username}</option>
+                    ))}
+                  </select>
+                  <button style={{ ...s.btnSave, padding: "6px 14px", whiteSpace: "nowrap" }} onClick={downloadCompletedPDF}>
+                    ⬇ Download PDF
+                  </button>
+                </div>
+              }
+            >
+              {completedWorks.length === 0 && <p style={s.emptyText}>No completed tasks yet</p>}
+              {completedWorks.map((work, i) => {
+                const dateKey = (work.completed_at || work.created_at || "").slice(0, 7);
+                const prevDateKey = i > 0 ? (completedWorks[i - 1].completed_at || completedWorks[i - 1].created_at || "").slice(0, 7) : null;
+                const showMonthHeader = dateKey !== prevDateKey;
+                return (
+                  <React.Fragment key={work.id}>
+                    {showMonthHeader && (
+                      <div style={{ padding: "10px 0 4px 0", fontWeight: 600, fontSize: 13, color: "#378ADD", letterSpacing: "0.05em" }}>
+                        {new Date(dateKey + "-01").toLocaleString("default", { month: "long", year: "numeric" })}
+                      </div>
+                    )}
+                    {i > 0 && !showMonthHeader && <Divider />}
+                    <div style={s.taskRow}>
+                      <div style={{ ...s.statusBar, background: STATUS_META[work.status]?.bar }} />
+                      <div style={s.taskLeft}>
+                        <div style={s.taskTitle}>{work.title}</div>
+                        <div style={s.taskDesc}>{work.description}</div>
+                        {work.work_report && (
+                          <div style={s.reportPreview}>Report: {work.work_report}</div>
+                        )}
+                        <div style={s.taskMeta}>
+                          <span style={s.taskEmployee}>
+                            To: {employeeMap[work.employee] || "Unassigned"}
+                          </span>
+                          <span style={s.taskEmployee}>
+                            Start (Assigned): {new Date(work.created_at).toLocaleString()}
+                          </span>
+                          <span style={s.taskEmployee}>
+                            End (Completed): {work.completed_at ? new Date(work.completed_at).toLocaleString() : "—"}
+                          </span>
+                          {work.completion_date && (
+                            <span style={s.taskEmployee}>
+                              Due: {new Date(work.completion_date).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+            </SectionCard>
+          )
+        })()}
+
 
         {activeTab === "messages" && (
           <div style={s.messageGrid}>
@@ -783,7 +1062,7 @@ const ManagerDashboard = () => {
 
               {selectedContact && (
                 <>
-                  <div style={s.messageList}>
+                  <div style={s.messageList} ref={scrollContainerRef}>
                     {messageLoading && <p style={s.emptyText}>Loading messages...</p>}
                     {!messageLoading && messages.length === 0 && (
                       <p style={s.emptyText}>No messages yet</p>
@@ -832,6 +1111,7 @@ const ManagerDashboard = () => {
                           </div>
                         );
                       })}
+                    <div ref={messagesEndRef} />
                   </div>
 
                   <div style={s.messageComposer}>

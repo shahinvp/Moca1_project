@@ -4,6 +4,7 @@ import Register from "./assets/components/Register";
 import ManagerDashboard from "./assets/components/ManagerDashboard";
 import EmployeeDashboard from "./assets/components/EmployeeDashboard";
 import ProtectedRoute from "./assets/components/ProtectedRoute";
+import ForgotPassword from "./assets/components/ForgotPassword";
 
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
         <Route path="/Register" element={<Register />} />
 
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route
           path="/manager-dashboard"
           element={

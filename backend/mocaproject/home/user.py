@@ -4,9 +4,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.contrib.auth import authenticate
 from .serializers import user_serializer
-from home.models import User
+from home.models import User, PasswordResetOTP
 from rest_framework import status
 from rest_framework.authtoken.models import Token
+import secrets
+from django.core.mail import send_mail
+from django.conf import settings
 
 
 @api_view(['POST'])
@@ -167,8 +170,120 @@ def delete_employee(request, id):
             {"error": "Employee not found"},
             status=status.HTTP_404_NOT_FOUND
         )
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def request_password_reset_otp(request):
+    username = (request.data.get("username") or "").strip()
+    email = (request.data.get("email") or "").strip().lower()
+    
+    if not username or not email:
+        return Response({"error": "Username and email are required"}, status=400)
+
+    try:
+        user = User.objects.filter(username__iexact=username, email__iexact=email).first()
+        if not user:
+            return Response({"error": "No account found with this username and email."}, status=400)
+    except Exception as e:
+        return Response({"error": "An error occurred while searching for the user."}, status=500)
+
+    PasswordResetOTP.objects.filter(email=email).delete()
+
+    # Generate 6-digit OTP
+    otp = f"{secrets.randbelow(1000000):06d}"
+    otp_record = PasswordResetOTP.objects.create(email=email, otp=otp)
+
+    # Send Email
+    subject = "Your Password Reset OTP"
+    message = f"Hello {user.username},\n\nYour 6-digit OTP for password reset is: {otp}\n\nThis OTP is valid for 60 seconds.\n\nIf you did not request this, please ignore this email."
+
+    using_smtp = settings.EMAIL_BACKEND == "django.core.mail.backends.smtp.EmailBackend"
+    if using_smtp and (not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD):
+        otp_record.delete()
+        missing_settings = []
+        if not settings.EMAIL_HOST_USER:
+            missing_settings.append("EMAIL_HOST_USER")
+        if not settings.EMAIL_HOST_PASSWORD:
+            missing_settings.append("EMAIL_HOST_PASSWORD")
+
+        return Response({
+            "error": (
+                "Email service is not configured. Add "
+                f"{', '.join(missing_settings)} to {settings.EMAIL_ENV_FILE}, "
+                "then restart the backend."
+            )
+        }, status=503)
+    
+    try:
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+    except Exception as e:
+        otp_record.delete()
+        print(f"Failed to send email: {e}")
+        return Response({"error": "Failed to send email. Please try again later."}, status=500)
+
+    return Response({"message": "OTP sent successfully to your email."})
 
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_password_reset_otp(request):
+    email = (request.data.get("email") or "").strip().lower()
+    otp = (request.data.get("otp") or "").strip()
+
+    if not email or not otp:
+        return Response({"error": "Email and OTP are required"}, status=400)
+
+    latest_otp = PasswordResetOTP.objects.filter(email=email).order_by('-created_at').first()
+
+    if not latest_otp:
+        return Response({"error": "Invalid OTP"}, status=400)
+
+    if latest_otp.is_expired():
+        latest_otp.delete()
+        return Response({"error": "OTP has expired"}, status=400)
+
+    if latest_otp.is_verified:
+        return Response({"error": "OTP already used. Please request a new OTP."}, status=400)
+
+    if latest_otp.otp != otp:
+        latest_otp.delete()
+        return Response({"error": "Invalid OTP. Please request a new OTP."}, status=400)
+
+    latest_otp.is_verified = True
+    latest_otp.save()
+
+    return Response({"message": "OTP verified successfully. You can now reset your password."})
 
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password(request):
+    email = (request.data.get("email") or "").strip().lower()
+    otp = (request.data.get("otp") or "").strip()
+    new_password = request.data.get("password")
 
+    if not email or not otp or not new_password:
+        return Response({"error": "Email, OTP and new password are required"}, status=400)
+
+    # Check if OTP was verified
+    otp_record = PasswordResetOTP.objects.filter(email=email, otp=otp, is_verified=True).order_by('-created_at').first()
+
+    if not otp_record:
+        return Response({"error": "OTP not verified or invalid"}, status=400)
+
+    if otp_record.is_expired():
+        otp_record.delete()
+        return Response({"error": "OTP session expired. Please request a new one."}, status=400)
+
+    try:
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            return Response({"error": "User not found"}, status=404)
+        user.set_password(new_password)
+        user.save()
+        
+        # Delete OTP records for this email after successful reset
+        PasswordResetOTP.objects.filter(email=email).delete()
+        
+        return Response({"message": "Password reset successful. You can now login with your new password."})
+    except User.DoesNotExist:
+        return Response({"error": "User not found"}, status=404)

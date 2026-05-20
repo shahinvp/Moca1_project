@@ -16,10 +16,19 @@ def assign_work(request):
     serializer = work_serializer.WorkSerializer(data=request.data)
 
     if serializer.is_valid():
-        serializer.save()
+        work = serializer.save()
+
+        # Send automated message notification
+        try:
+            body = f"🔔 NEW TASK ASSIGNED: {work.title}\n\nDescription: {work.description}\n\nPlease check your task dashboard to accept and start working."
+            message = Message(sender=work.manager, receiver=work.employee)
+            message.set_body(body)
+            message.save()
+        except Exception as e:
+            print(f"Failed to send auto-message: {e}")
 
         return Response({
-            "message": "Work assigned"
+            "message": "Work assigned and notification sent"
         })
 
     return Response(serializer.errors, status=400)
@@ -44,13 +53,21 @@ def update_work(request, pk):
     except Work.DoesNotExist:
         return Response({"error": "Work not found"}, status=404)
 
+    was_completed = work.status == "completed"
+
     serializer = work_serializer.WorkSerializer(work, data=request.data, partial=True)
 
     if serializer.is_valid():
-        serializer.save()
+        updated_work = serializer.save()
+        
+        # If it was just marked as completed, record the timestamp
+        if request.data.get("status") == "completed" and not was_completed:
+            updated_work.completed_at = timezone.now()
+            updated_work.save(update_fields=["completed_at"])
+            
         return Response({
             "message": "Work updated successfully",
-            "data": serializer.data
+            "data": work_serializer.WorkSerializer(updated_work).data
         })
 
     return Response(serializer.errors, status=400)

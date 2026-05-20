@@ -154,6 +154,7 @@ const styles = {
     border: "1px solid #ddd",
     fontSize: "14px",
     outline: "none",
+    boxSizing: "border-box",
   },
 
   button: {
@@ -166,6 +167,7 @@ const styles = {
     fontWeight: "600",
     fontSize: "15px",
     cursor: "pointer",
+    boxSizing: "border-box",
   },
 
   buttonDisabled: {
